@@ -67,15 +67,15 @@ class VideoAnalysisResult {
 
   /// Convert to JSON map
   Map<String, dynamic> toJson() => {
-        'frames': frames.map((f) => f.toJson()).toList(),
-        'totalFrames': totalFrames,
-        'analyzedFrames': analyzedFrames,
-        'durationSeconds': durationSeconds,
-        'frameRate': frameRate,
-        'width': width,
-        'height': height,
-        'totalAnalysisTimeMs': totalAnalysisTimeMs,
-      };
+    'frames': frames.map((f) => f.toJson()).toList(),
+    'totalFrames': totalFrames,
+    'analyzedFrames': analyzedFrames,
+    'durationSeconds': durationSeconds,
+    'frameRate': frameRate,
+    'width': width,
+    'height': height,
+    'totalAnalysisTimeMs': totalAnalysisTimeMs,
+  };
 }
 
 /// Result for a single video frame
@@ -106,10 +106,10 @@ class VideoFrameResult {
 
   /// Convert to JSON map
   Map<String, dynamic> toJson() => {
-        'frameIndex': frameIndex,
-        'timestampSeconds': timestampSeconds,
-        'result': result.toJson(),
-      };
+    'frameIndex': frameIndex,
+    'timestampSeconds': timestampSeconds,
+    'result': result.toJson(),
+  };
 }
 
 /// Progress event during video analysis
@@ -147,17 +147,17 @@ class VideoAnalysisProgress {
       totalFrames: json['totalFrames'] as int,
       currentTimeSeconds: (json['currentTimeSeconds'] as num).toDouble(),
       durationSeconds: (json['durationSeconds'] as num).toDouble(),
-      estimatedRemainingSeconds:
-          (json['estimatedRemainingSeconds'] as num?)?.toDouble(),
+      estimatedRemainingSeconds: (json['estimatedRemainingSeconds'] as num?)
+          ?.toDouble(),
     );
   }
 
   /// Convert to JSON map
   Map<String, dynamic> toJson() => {
-        'currentFrame': currentFrame,
-        'totalFrames': totalFrames,
-        'currentTimeSeconds': currentTimeSeconds,
-        'durationSeconds': durationSeconds,
-        'estimatedRemainingSeconds': estimatedRemainingSeconds,
-      };
+    'currentFrame': currentFrame,
+    'totalFrames': totalFrames,
+    'currentTimeSeconds': currentTimeSeconds,
+    'durationSeconds': durationSeconds,
+    'estimatedRemainingSeconds': estimatedRemainingSeconds,
+  };
 }

@@ -86,10 +86,10 @@ class PoseLandmark {
   ///
   /// Used for landmarks that the native framework cannot detect.
   const PoseLandmark.notDetected(this.type)
-      : x = 0.0,
-        y = 0.0,
-        z = 0.0,
-        visibility = 0.0;
+    : x = 0.0,
+      y = 0.0,
+      z = 0.0,
+      visibility = 0.0;
 
   /// Whether this landmark was detected (visibility > 0).
   bool get isDetected => visibility > 0;

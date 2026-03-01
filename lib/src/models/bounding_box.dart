@@ -67,12 +67,7 @@ class BoundingBox {
 
   /// Convert this bounding box to a JSON map.
   Map<String, dynamic> toJson() {
-    return {
-      'left': left,
-      'top': top,
-      'width': width,
-      'height': height,
-    };
+    return {'left': left, 'top': top, 'width': width, 'height': height};
   }
 
   @override

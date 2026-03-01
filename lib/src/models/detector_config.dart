@@ -95,30 +95,30 @@ class PoseDetectorConfig {
     this.enableZEstimation = true,
     this.preferredAcceleration,
     this.skelLibraryDir,
-  })  : assert(maxPoses >= 1 && maxPoses <= 10),
-        assert(minConfidence >= 0.0 && minConfidence <= 1.0);
+  }) : assert(maxPoses >= 1 && maxPoses <= 10),
+       assert(minConfidence >= 0.0 && minConfidence <= 1.0);
 
   /// Configuration optimized for realtime camera streams.
   ///
   /// Uses fast mode, single pose detection, and lower confidence threshold
   /// for maximum frame rate.
   factory PoseDetectorConfig.realtime() => const PoseDetectorConfig(
-        mode: DetectionMode.fast,
-        maxPoses: 1,
-        minConfidence: 0.3,
-        enableZEstimation: false,
-      );
+    mode: DetectionMode.fast,
+    maxPoses: 1,
+    minConfidence: 0.3,
+    enableZEstimation: false,
+  );
 
   /// Configuration optimized for accuracy.
   ///
   /// Uses accurate mode with higher confidence threshold.
   /// Best for still images or video analysis.
   factory PoseDetectorConfig.accurate() => const PoseDetectorConfig(
-        mode: DetectionMode.accurate,
-        maxPoses: 5,
-        minConfidence: 0.5,
-        enableZEstimation: true,
-      );
+    mode: DetectionMode.accurate,
+    maxPoses: 5,
+    minConfidence: 0.5,
+    enableZEstimation: true,
+  );
 
   /// Create a copy of this config with some fields replaced.
   PoseDetectorConfig copyWith({
@@ -187,11 +187,11 @@ class PoseDetectorConfig {
 
   @override
   int get hashCode => Object.hash(
-        mode,
-        maxPoses,
-        minConfidence,
-        enableZEstimation,
-        preferredAcceleration,
-        skelLibraryDir,
-      );
+    mode,
+    maxPoses,
+    minConfidence,
+    enableZEstimation,
+    preferredAcceleration,
+    skelLibraryDir,
+  );
 }

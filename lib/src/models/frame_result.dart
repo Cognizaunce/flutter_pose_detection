@@ -36,11 +36,11 @@ class FrameResult {
 
   /// Convert to JSON map
   Map<String, dynamic> toJson() => {
-        'result': result.toJson(),
-        'frameNumber': frameNumber,
-        'timestampUs': timestampUs,
-        'fps': fps,
-      };
+    'result': result.toJson(),
+    'frameNumber': frameNumber,
+    'timestampUs': timestampUs,
+    'fps': fps,
+  };
 
   @override
   String toString() =>

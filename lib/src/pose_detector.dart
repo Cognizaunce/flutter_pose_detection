@@ -61,7 +61,7 @@ class NpuPoseDetector {
   ///
   /// If no [config] is provided, default settings are used.
   NpuPoseDetector({PoseDetectorConfig? config})
-      : _config = config ?? const PoseDetectorConfig();
+    : _config = config ?? const PoseDetectorConfig();
 
   /// The platform implementation.
   PoseDetectorPlatform get _platform => PoseDetectorPlatform.instance;

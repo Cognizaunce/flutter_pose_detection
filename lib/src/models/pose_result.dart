@@ -76,8 +76,9 @@ class PoseResult {
   /// Create a [PoseResult] from a JSON map.
   factory PoseResult.fromJson(Map<String, dynamic> json) {
     final poseList = json['poses'] as List<dynamic>? ?? [];
-    final poses =
-        poseList.map((p) => Pose.fromJson(p as Map<String, dynamic>)).toList();
+    final poses = poseList
+        .map((p) => Pose.fromJson(p as Map<String, dynamic>))
+        .toList();
 
     return PoseResult(
       poses: poses,
@@ -131,10 +132,10 @@ class PoseResult {
 
   @override
   int get hashCode => Object.hash(
-        Object.hashAll(poses),
-        processingTimeMs,
-        accelerationMode,
-        imageWidth,
-        imageHeight,
-      );
+    Object.hashAll(poses),
+    processingTimeMs,
+    accelerationMode,
+    imageWidth,
+    imageHeight,
+  );
 }

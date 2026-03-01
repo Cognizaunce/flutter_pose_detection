@@ -52,11 +52,7 @@ class Pose {
   /// Creates a new [Pose].
   ///
   /// Note: landmarks list must have exactly [LandmarkType.count] elements.
-  const Pose({
-    required this.landmarks,
-    required this.score,
-    this.boundingBox,
-  });
+  const Pose({required this.landmarks, required this.score, this.boundingBox});
 
   /// Get a landmark by its type.
   ///
@@ -209,9 +205,6 @@ class Pose {
   }
 
   @override
-  int get hashCode => Object.hash(
-        Object.hashAll(landmarks),
-        score,
-        boundingBox,
-      );
+  int get hashCode =>
+      Object.hash(Object.hashAll(landmarks), score, boundingBox);
 }
