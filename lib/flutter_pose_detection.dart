@@ -50,10 +50,14 @@ export 'src/models/detection_mode.dart';
 export 'src/models/detector_config.dart';
 export 'src/models/frame_result.dart';
 export 'src/models/landmark_type.dart';
+export 'src/models/motion_engine_config.dart';
 export 'src/models/pose.dart';
 export 'src/models/pose_landmark.dart';
 export 'src/models/pose_result.dart';
 export 'src/models/video_analysis_result.dart';
+
+// Native Motion Engine
+export 'src/native_motion_engine.dart';
 
 // Errors
 export 'src/errors/detection_error.dart';

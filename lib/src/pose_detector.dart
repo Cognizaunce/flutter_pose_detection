@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'models/acceleration_mode.dart';
 import 'models/detector_config.dart';
 import 'models/frame_result.dart';
+import 'models/motion_engine_config.dart';
 import 'models/pose_result.dart';
 import 'models/video_analysis_result.dart';
+import 'native_motion_engine.dart';
 import 'platform/method_channel_pose_detector.dart';
 import 'platform/pose_detector_platform.dart';
 
@@ -345,5 +347,52 @@ class NpuPoseDetector {
       return platform.benchmarkDelegates(iterations: iterations);
     }
     return {'success': false, 'error': 'Benchmarking not supported'};
+  }
+
+  // MARK: - Native Motion Engine
+
+  /// Start the native motion engine for low-latency FFI-based pose detection.
+  ///
+  /// Returns a [NativeMotionEngine] that provides:
+  /// - [NativeMotionEngine.textureId] for displaying the camera feed
+  /// - [NativeMotionEngine.readLatestPose] for reading pose data via FFI
+  ///
+  /// Camera frames NEVER pass through Dart. Pose data is read directly from
+  /// shared native memory via FFI, eliminating serialization overhead.
+  ///
+  /// ```dart
+  /// final engine = await detector.startMotionEngine();
+  ///
+  /// // Display camera
+  /// Texture(textureId: engine.textureId)
+  ///
+  /// // Read poses (e.g., in animation frame callback)
+  /// final snapshot = engine.readLatestPose();
+  /// if (snapshot != null) {
+  ///   final nose = snapshot.poseLandmarks[0];
+  ///   print('Nose: (${nose.x}, ${nose.y})');
+  /// }
+  ///
+  /// // Stop when done
+  /// await detector.stopMotionEngine();
+  /// ```
+  Future<NativeMotionEngine> startMotionEngine({
+    MotionEngineConfig config = const MotionEngineConfig(),
+  }) async {
+    final result = await _platform.initializeMotionEngine(config.toJson());
+    return NativeMotionEngine.fromPlatformResult(result);
+  }
+
+  /// Update the motion engine configuration.
+  ///
+  /// This stops inference, destroys the landmarker, and recreates it
+  /// with the new config. Camera feed continues uninterrupted.
+  Future<void> updateMotionEngineConfig(MotionEngineConfig config) async {
+    await _platform.updateMotionEngineConfig(config.toJson());
+  }
+
+  /// Stop the native motion engine and release all resources.
+  Future<void> stopMotionEngine() async {
+    await _platform.disposeMotionEngine();
   }
 }

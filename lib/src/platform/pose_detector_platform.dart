@@ -116,4 +116,16 @@ abstract class PoseDetectorPlatform extends PlatformInterface {
 
   /// Cancel ongoing video analysis.
   Future<void> cancelVideoAnalysis();
+
+  /// Initialize the native motion engine.
+  ///
+  /// Returns a map with 'textureId' (int) and 'pointerAddress' (int).
+  Future<Map<String, dynamic>> initializeMotionEngine(
+      Map<String, dynamic> config);
+
+  /// Update the motion engine configuration (requires landmarker reinit).
+  Future<void> updateMotionEngineConfig(Map<String, dynamic> config);
+
+  /// Dispose the motion engine and release all resources.
+  Future<void> disposeMotionEngine();
 }

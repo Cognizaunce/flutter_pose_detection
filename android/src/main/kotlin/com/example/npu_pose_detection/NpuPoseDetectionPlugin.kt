@@ -1,14 +1,18 @@
 package com.example.npu_pose_detection
 
+import android.app.Activity
 import android.content.Context
 import android.os.Build
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.view.TextureRegistry
 import kotlinx.coroutines.*
 import com.example.npu_pose_detection.models.*
 
@@ -17,7 +21,7 @@ import com.example.npu_pose_detection.models.*
  *
  * Uses MediaPipe PoseLandmarker for 33-landmark detection with GPU acceleration.
  */
-class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHandler {
+class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHandler, ActivityAware {
 
     companion object {
         private const val TAG = "NpuPoseDetectionPlugin"
@@ -30,9 +34,12 @@ class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.St
     private lateinit var eventChannel: EventChannel
     private lateinit var videoProgressChannel: EventChannel
     private lateinit var context: Context
+    private var textureRegistry: TextureRegistry? = null
+    private var activity: Activity? = null
     private var mediaPipeDetector: MediaPipeNpuDetector? = null
     private var tfliteDetector: TFLitePoseDetector? = null
     private var activeDetector: PoseDetectorInterface? = null
+    private var nativeMotionEngine: NativeMotionEngine? = null
     private var config: DetectorConfig = DetectorConfig()
     private var useNpuBackend: Boolean = false
 
@@ -48,6 +55,7 @@ class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.St
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
+        textureRegistry = flutterPluginBinding.textureRegistry
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, METHOD_CHANNEL)
         channel.setMethodCallHandler(this)
 
@@ -73,6 +81,9 @@ class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.St
             "updateConfig" -> handleUpdateConfig(call, result)
             "getDeviceCapabilities" -> handleGetDeviceCapabilities(result)
             "benchmarkDelegates" -> handleBenchmarkDelegates(call, result)
+            "initializeMotionEngine" -> handleInitializeMotionEngine(call, result)
+            "updateMotionEngineConfig" -> handleUpdateMotionEngineConfig(call, result)
+            "disposeMotionEngine" -> handleDisposeMotionEngine(result)
             "dispose" -> handleDispose(result)
             else -> result.notImplemented()
         }
@@ -467,8 +478,94 @@ class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.St
         mediaPipeDetector = null
         tfliteDetector?.dispose()
         tfliteDetector = null
+        nativeMotionEngine?.dispose()
+        nativeMotionEngine = null
         useNpuBackend = false
         result.success(mapOf("success" to true))
+    }
+
+    // MARK: - Motion Engine
+
+    private fun handleInitializeMotionEngine(call: MethodCall, result: Result) {
+        val currentActivity = activity
+        val currentTextureRegistry = textureRegistry
+        if (currentActivity == null || currentTextureRegistry == null) {
+            result.success(errorResponse(
+                "notInitialized",
+                "Activity or TextureRegistry not available"
+            ))
+            return
+        }
+
+        val args = call.arguments as? Map<*, *>
+        @Suppress("UNCHECKED_CAST")
+        val config = (args?.get("config") as? Map<String, Any>) ?: emptyMap()
+
+        try {
+            nativeMotionEngine?.dispose()
+            nativeMotionEngine = NativeMotionEngine(context, currentTextureRegistry, currentActivity)
+            val engineResult = nativeMotionEngine!!.initialize(config)
+
+            result.success(mapOf(
+                "success" to true,
+                "textureId" to engineResult["textureId"],
+                "pointerAddress" to engineResult["pointerAddress"]
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Motion engine init failed: ${e.message}", e)
+            result.success(errorResponse(
+                "modelLoadFailed",
+                "Failed to initialize motion engine",
+                e.message
+            ))
+        }
+    }
+
+    private fun handleUpdateMotionEngineConfig(call: MethodCall, result: Result) {
+        val engine = nativeMotionEngine
+        if (engine == null) {
+            result.success(errorResponse("notInitialized", "Motion engine not initialized"))
+            return
+        }
+
+        val args = call.arguments as? Map<*, *>
+        @Suppress("UNCHECKED_CAST")
+        val config = (args?.get("config") as? Map<String, Any>) ?: emptyMap()
+
+        try {
+            engine.updateConfig(config)
+            result.success(mapOf("success" to true))
+        } catch (e: Exception) {
+            result.success(errorResponse(
+                "inferenceFailed",
+                "Config update failed",
+                e.message
+            ))
+        }
+    }
+
+    private fun handleDisposeMotionEngine(result: Result) {
+        nativeMotionEngine?.dispose()
+        nativeMotionEngine = null
+        result.success(mapOf("success" to true))
+    }
+
+    // MARK: - ActivityAware
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
     }
 
     // Public method for VideoProgressStreamHandler
@@ -500,11 +597,14 @@ class NpuPoseDetectionPlugin : FlutterPlugin, MethodCallHandler, EventChannel.St
         eventChannel.setStreamHandler(null)
         videoProgressChannel.setStreamHandler(null)
         scope.cancel()
+        nativeMotionEngine?.dispose()
+        nativeMotionEngine = null
         activeDetector = null
         mediaPipeDetector?.dispose()
         mediaPipeDetector = null
         tfliteDetector?.dispose()
         tfliteDetector = null
+        textureRegistry = null
     }
 }
 

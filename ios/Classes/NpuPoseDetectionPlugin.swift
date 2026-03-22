@@ -13,6 +13,8 @@ public class NpuPoseDetectionPlugin: NSObject, FlutterPlugin {
 
     private var mediaPipeDetector: MediaPipePoseDetector?
     private var config: DetectorConfig = DetectorConfig()
+    private var nativeMotionEngine: NativeMotionEngine?
+    private var textureRegistry: FlutterTextureRegistry?
 
     /// Returns the active pose detector.
     private var poseDetector: PoseDetectorProtocol? {
@@ -39,6 +41,7 @@ public class NpuPoseDetectionPlugin: NSObject, FlutterPlugin {
             binaryMessenger: registrar.messenger()
         )
         let instance = NpuPoseDetectionPlugin()
+        instance.textureRegistry = registrar.textures()
         registrar.addMethodCallDelegate(instance, channel: methodChannel)
 
         // Setup EventChannel for camera frame streaming
@@ -80,6 +83,12 @@ public class NpuPoseDetectionPlugin: NSObject, FlutterPlugin {
             handleUpdateConfig(call, result: result)
         case "getDeviceCapabilities":
             handleGetDeviceCapabilities(result: result)
+        case "initializeMotionEngine":
+            handleInitializeMotionEngine(call, result: result)
+        case "updateMotionEngineConfig":
+            handleUpdateMotionEngineConfig(call, result: result)
+        case "disposeMotionEngine":
+            handleDisposeMotionEngine(result: result)
         case "dispose":
             handleDispose(result: result)
         default:
@@ -458,6 +467,49 @@ public class NpuPoseDetectionPlugin: NSObject, FlutterPlugin {
         videoProcessor = nil
         mediaPipeDetector?.dispose()
         mediaPipeDetector = nil
+        nativeMotionEngine?.dispose()
+        nativeMotionEngine = nil
+        result(["success": true])
+    }
+
+    // MARK: - Motion Engine
+
+    private func handleInitializeMotionEngine(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let registry = textureRegistry else {
+            result(errorResponse(code: "notInitialized", message: "TextureRegistry not available"))
+            return
+        }
+
+        let args = call.arguments as? [String: Any]
+        let config = args?["config"] as? [String: Any] ?? [:]
+
+        nativeMotionEngine?.dispose()
+        nativeMotionEngine = NativeMotionEngine(textureRegistry: registry)
+        let engineResult = nativeMotionEngine!.initialize(config: config)
+
+        result([
+            "success": true,
+            "textureId": engineResult["textureId"] as Any,
+            "pointerAddress": engineResult["pointerAddress"] as Any
+        ])
+    }
+
+    private func handleUpdateMotionEngineConfig(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let engine = nativeMotionEngine else {
+            result(errorResponse(code: "notInitialized", message: "Motion engine not initialized"))
+            return
+        }
+
+        let args = call.arguments as? [String: Any]
+        let config = args?["config"] as? [String: Any] ?? [:]
+
+        engine.updateConfig(config)
+        result(["success": true])
+    }
+
+    private func handleDisposeMotionEngine(result: @escaping FlutterResult) {
+        nativeMotionEngine?.dispose()
+        nativeMotionEngine = nil
         result(["success": true])
     }
 

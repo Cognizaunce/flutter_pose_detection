@@ -500,4 +500,69 @@ class MethodChannelPoseDetector extends PoseDetectorPlatform {
       return {'success': false, 'error': e.message ?? 'Platform exception'};
     }
   }
+
+  // MARK: - Motion Engine
+
+  @override
+  Future<Map<String, dynamic>> initializeMotionEngine(
+      Map<String, dynamic> config) async {
+    try {
+      final result = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'initializeMotionEngine',
+        {'config': config},
+      );
+
+      if (result == null) {
+        throw DetectionError.fromCode(DetectionErrorCode.unknown);
+      }
+
+      final success = result['success'] as bool? ?? false;
+      if (!success) {
+        final error = result['error'] as Map<dynamic, dynamic>?;
+        if (error != null) {
+          throw DetectionError.fromJson(_convertMap(error));
+        }
+        throw DetectionError.fromCode(DetectionErrorCode.modelLoadFailed);
+      }
+
+      return _convertMap(result);
+    } on PlatformException catch (e) {
+      throw _handlePlatformException(e);
+    }
+  }
+
+  @override
+  Future<void> updateMotionEngineConfig(Map<String, dynamic> config) async {
+    try {
+      final result = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'updateMotionEngineConfig',
+        {'config': config},
+      );
+
+      if (result == null) {
+        throw DetectionError.fromCode(DetectionErrorCode.unknown);
+      }
+
+      final success = result['success'] as bool? ?? false;
+      if (!success) {
+        final error = result['error'] as Map<dynamic, dynamic>?;
+        if (error != null) {
+          throw DetectionError.fromJson(_convertMap(error));
+        }
+      }
+    } on PlatformException catch (e) {
+      throw _handlePlatformException(e);
+    }
+  }
+
+  @override
+  Future<void> disposeMotionEngine() async {
+    try {
+      await _methodChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'disposeMotionEngine',
+      );
+    } catch (_) {
+      // Ignore errors during disposal
+    }
+  }
 }

@@ -16,12 +16,14 @@ Neural Engine acceleration on supported devices.
   s.author           = { 'JaeungHyun' => 'jaeung@example.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*'
+  s.public_header_files = 'Classes/pose_buffer.h'
   s.resource_bundles = {
     'flutter_pose_detection' => ['Assets/**/*']
   }
   s.dependency 'Flutter'
   s.dependency 'TensorFlowLiteSwift/CoreML', '~> 2.14.0'
   s.dependency 'TensorFlowLiteSwift/Metal', '~> 2.14.0'
+  s.dependency 'MediaPipeTasksVision', '~> 0.10.14'
   s.platform = :ios, '14.0'
   s.frameworks = 'Vision', 'CoreML', 'AVFoundation', 'Metal'
   s.static_framework = true
