@@ -12,8 +12,8 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.framework.image.MPImage
-import com.google.mediapipe.framework.image.MediaImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions
@@ -22,6 +22,7 @@ import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 import io.flutter.view.TextureRegistry
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * High-performance native motion engine using CameraX + MediaPipe PoseLandmarker.
@@ -64,15 +65,19 @@ class NativeMotionEngine(
     // State
     private var bufferPointer: Long = 0
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
-    private var poseLandmarker: PoseLandmarker? = null
+    @Volatile private var poseLandmarker: PoseLandmarker? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
     private val analysisExecutor = Executors.newSingleThreadExecutor()
+    private val bufferLock = Any()
+    private val landmarkerLock = Any()
 
     // Timestamp synchronization — prevents landmark drift
     @Volatile
     private var latestSubmittedTimestamp: Long = 0
     private var frameId: Int = 0
+    @Volatile
+    private var currentRotationDegrees: Int = 0
 
     // Reusable arrays — NO per-frame allocation
     private val poseLandmarkData = FloatArray(NUM_LANDMARKS * 4)
@@ -149,6 +154,7 @@ class NativeMotionEngine(
 
     /**
      * MediaPipe result callback — extracts all 33 landmarks + world landmarks,
+     * transforms from sensor coordinates to display coordinates,
      * flattens into reusable arrays, writes to C buffer via JNI.
      */
     private fun handlePoseResult(result: PoseLandmarkerResult, input: MPImage) {
@@ -161,16 +167,40 @@ class NativeMotionEngine(
 
         val imageLandmarks = result.landmarks()[0]
         val worldLandmarks = result.worldLandmarks()[0]
+        val rotation = currentRotationDegrees
 
         // Flatten into reusable arrays: [x, y, z, visibility] × 33
+        // Transform image-space landmarks from sensor coordinates to portrait display space.
+        // MediaPipe returns normalized coords in the original (unrotated) image space.
         for (i in 0 until NUM_LANDMARKS) {
             val idx = i * 4
             val lm = imageLandmarks[i]
-            poseLandmarkData[idx] = lm.x()
-            poseLandmarkData[idx + 1] = lm.y()
+            val sx = lm.x()
+            val sy = lm.y()
+
+            // Rotate normalized coords to match upright display
+            when (rotation) {
+                90 -> {
+                    poseLandmarkData[idx] = 1f - sy
+                    poseLandmarkData[idx + 1] = sx
+                }
+                180 -> {
+                    poseLandmarkData[idx] = 1f - sx
+                    poseLandmarkData[idx + 1] = 1f - sy
+                }
+                270 -> {
+                    poseLandmarkData[idx] = sy
+                    poseLandmarkData[idx + 1] = 1f - sx
+                }
+                else -> {
+                    poseLandmarkData[idx] = sx
+                    poseLandmarkData[idx + 1] = sy
+                }
+            }
             poseLandmarkData[idx + 2] = lm.z()
             poseLandmarkData[idx + 3] = lm.visibility().orElse(0f)
 
+            // World landmarks are in meters (hip-centered) — rotation-independent
             val wlm = worldLandmarks[i]
             worldLandmarkData[idx] = wlm.x()
             worldLandmarkData[idx + 1] = wlm.y()
@@ -180,10 +210,14 @@ class NativeMotionEngine(
 
         // Write ALL landmark values first, then frameId LAST
         frameId++
-        nativeWriteLandmarks(bufferPointer, frameId, poseLandmarkData, worldLandmarkData)
+        synchronized(bufferLock) {
+            if (bufferPointer != 0L) {
+                nativeWriteLandmarks(bufferPointer, frameId, poseLandmarkData, worldLandmarkData)
+            }
+        }
     }
 
-    private fun startCamera() {
+    fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
@@ -212,7 +246,7 @@ class NativeMotionEngine(
         imageAnalysis = ImageAnalysis.Builder()
             .setTargetResolution(Size(640, 480))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
 
         imageAnalysis!!.setAnalyzer(analysisExecutor) { imageProxy ->
@@ -233,24 +267,29 @@ class NativeMotionEngine(
     }
 
     private fun processImageProxy(imageProxy: ImageProxy) {
-        val mediaImage = imageProxy.image
-        if (mediaImage == null) {
-            imageProxy.close()
-            return
-        }
-
         try {
-            // Direct MediaImage → MPImage (NO Bitmap conversion)
-            val mpImage = MediaImageBuilder(mediaImage).build()
+            // CameraX RGBA_8888 → Bitmap → MPImage (no per-frame allocation beyond toBitmap)
+            val bitmap = imageProxy.toBitmap()
+            val mpImage = BitmapImageBuilder(bitmap).build()
 
             val timestampMs = imageProxy.imageInfo.timestamp / 1000 // us → ms
-            latestSubmittedTimestamp = timestampMs
 
+            // Store rotation for landmark coordinate transform in handlePoseResult
+            currentRotationDegrees = imageProxy.imageInfo.rotationDegrees
+
+            // Let MediaPipe handle rotation on GPU — zero allocation
+            val rotation = imageProxy.imageInfo.rotationDegrees
             val processingOptions = ImageProcessingOptions.builder()
-                .setRotationDegrees(imageProxy.imageInfo.rotationDegrees)
+                .setRotationDegrees(rotation)
                 .build()
 
-            poseLandmarker?.detectAsync(mpImage, processingOptions, timestampMs)
+            synchronized(landmarkerLock) {
+                val landmarker = poseLandmarker ?: return
+                // Guard monotonic timestamp inside lock to prevent races with updateConfig reset
+                if (timestampMs <= latestSubmittedTimestamp) return
+                latestSubmittedTimestamp = timestampMs
+                landmarker.detectAsync(mpImage, processingOptions, timestampMs)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Inference error: ${e.message}")
         } finally {
@@ -265,38 +304,51 @@ class NativeMotionEngine(
     fun updateConfig(config: Map<String, Any>) {
         applyConfig(config)
 
-        // Destroy current landmarker
-        poseLandmarker?.close()
-        poseLandmarker = null
-        frameId = 0
-        latestSubmittedTimestamp = 0
+        synchronized(landmarkerLock) {
+            // Close current landmarker while holding lock — blocks processImageProxy
+            poseLandmarker?.close()
+            poseLandmarker = null
+            frameId = 0
+            latestSubmittedTimestamp = 0
 
-        // Recreate with new config
-        initializePoseLandmarker()
+            // Recreate with new config (still under lock so no frames sneak in)
+            initializePoseLandmarker()
+        }
         Log.i(TAG, "PoseLandmarker reinitialized with new config")
     }
 
     fun dispose() {
-        // Stop camera
+        // 1. Stop camera — no new frames enter the pipeline
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageAnalysis = null
 
-        // Destroy landmarker
-        poseLandmarker?.close()
-        poseLandmarker = null
+        // 2. Drain executor — wait for in-flight processImageProxy/detectAsync calls
+        analysisExecutor.shutdown()
+        try {
+            analysisExecutor.awaitTermination(2, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
 
-        // Release texture
+        // 3. Close landmarker after executor is idle — no detectAsync in-flight
+        synchronized(landmarkerLock) {
+            poseLandmarker?.close()
+            poseLandmarker = null
+        }
+
+        // 4. Release texture
         textureEntry?.release()
         textureEntry = null
 
-        // Free native buffer
-        if (bufferPointer != 0L) {
-            nativeFreeBuffer(bufferPointer)
-            bufferPointer = 0
+        // 5. Free native buffer under lock — prevents write-after-free
+        synchronized(bufferLock) {
+            if (bufferPointer != 0L) {
+                nativeFreeBuffer(bufferPointer)
+                bufferPointer = 0
+            }
         }
 
-        analysisExecutor.shutdown()
         Log.i(TAG, "NativeMotionEngine disposed")
     }
 }

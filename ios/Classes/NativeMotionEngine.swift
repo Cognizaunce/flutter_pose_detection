@@ -190,12 +190,17 @@ class NativeMotionEngine: NSObject {
     // MARK: - Dispose
 
     func dispose() {
-        sessionQueue.async { [weak self] in
-            self?.captureSession?.stopRunning()
-            self?.captureSession = nil
-        }
-
+        // Stop landmarker first — prevents new callbacks
         poseLandmarker = nil
+
+        // Drain inferenceQueue to ensure no in-flight callbacks
+        inferenceQueue.sync {}
+
+        // Now safe to stop camera
+        sessionQueue.sync {
+            captureSession?.stopRunning()
+            captureSession = nil
+        }
 
         if let texId = cameraTexture != nil ? textureId : nil {
             textureRegistry?.unregisterTexture(texId)
@@ -250,6 +255,7 @@ extension NativeMotionEngine: PoseLandmarkerLiveStreamDelegate {
     ) {
         guard let result = result, error == nil else { return }
         guard !result.landmarks.isEmpty else { return }
+        guard bufferPointer != nil else { return }
 
         let imageLandmarks = result.landmarks[0]
         let worldLandmarks = result.worldLandmarks[0]
@@ -285,10 +291,18 @@ extension NativeMotionEngine: PoseLandmarkerLiveStreamDelegate {
 /// Provides camera pixel buffers to the Flutter texture system.
 /// Updates are decoupled from inference — rendering MUST NOT wait for pose detection.
 class CameraFlutterTexture: NSObject, FlutterTexture {
-    var latestPixelBuffer: CVPixelBuffer?
+    private let lock = NSLock()
+    private var _latestPixelBuffer: CVPixelBuffer?
+
+    var latestPixelBuffer: CVPixelBuffer? {
+        get { lock.lock(); defer { lock.unlock() }; return _latestPixelBuffer }
+        set { lock.lock(); _latestPixelBuffer = newValue; lock.unlock() }
+    }
 
     func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
-        guard let buffer = latestPixelBuffer else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        guard let buffer = _latestPixelBuffer else { return nil }
         return Unmanaged.passRetained(buffer)
     }
 }
