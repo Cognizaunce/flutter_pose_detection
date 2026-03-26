@@ -124,14 +124,8 @@ class NativeMotionEngine {
     if (frameId == _lastFrameId) return null;
 
     // Copy all landmark data
-    final poseData = List<double>.generate(
-      132,
-      (i) => ref.poseLandmarks[i],
-    );
-    final worldData = List<double>.generate(
-      132,
-      (i) => ref.worldLandmarks[i],
-    );
+    final poseData = List<double>.generate(132, (i) => ref.poseLandmarks[i]);
+    final worldData = List<double>.generate(132, (i) => ref.worldLandmarks[i]);
 
     // Torn read detection: re-check frameId
     if (_buffer.ref.frameId != frameId) return null;

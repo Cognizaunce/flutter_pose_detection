@@ -3,6 +3,7 @@ import 'package:flutter_pose_detection/flutter_pose_detection.dart';
 
 import 'pages/camera_detection_page.dart';
 import 'pages/image_detection_page.dart';
+import 'pages/motion_engine_page.dart';
 import 'pages/video_analysis_page.dart';
 
 void main() {
@@ -280,6 +281,19 @@ class _HomePageState extends State<HomePage> {
                 context,
                 MaterialPageRoute(
                   builder: (context) => const CameraDetectionPage(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildFeatureCard(
+              context,
+              icon: Icons.speed,
+              title: 'Motion Engine (FFI)',
+              description: 'High-performance native camera + FFI pose data',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const MotionEnginePage(),
                 ),
               ),
             ),

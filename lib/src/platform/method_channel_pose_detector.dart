@@ -505,7 +505,8 @@ class MethodChannelPoseDetector extends PoseDetectorPlatform {
 
   @override
   Future<Map<String, dynamic>> initializeMotionEngine(
-      Map<String, dynamic> config) async {
+    Map<String, dynamic> config,
+  ) async {
     try {
       final result = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>(
         'initializeMotionEngine',

@@ -29,11 +29,12 @@ class NativeMotionEngine: NSObject {
     private var textureId: Int64 = -1
     private weak var textureRegistry: FlutterTextureRegistry?
 
-    // MediaPipe
+    // MediaPipe — accessed only on inferenceQueue
     private var poseLandmarker: PoseLandmarker?
 
-    // C buffer (allocated once, never reallocated)
+    // C buffer — protected by bufferQueue
     private var bufferPointer: UnsafeMutablePointer<PoseBuffer>?
+    private let bufferQueue = DispatchQueue(label: "com.example.npu_pose_detection.buffer")
 
     // Timestamp synchronization
     private var latestSubmittedTimestamp: Int = 0
@@ -176,42 +177,47 @@ class NativeMotionEngine: NSObject {
     // MARK: - Config Update
 
     /// Update configuration. Destroys and recreates the landmarker.
+    /// Synchronized on inferenceQueue to prevent racing with captureOutput.
     func updateConfig(_ config: [String: Any]) {
         applyConfig(config)
 
-        poseLandmarker = nil
-        frameId = 0
-        latestSubmittedTimestamp = 0
-
-        initializePoseLandmarker()
+        inferenceQueue.sync {
+            poseLandmarker = nil
+            frameId = 0
+            latestSubmittedTimestamp = 0
+            initializePoseLandmarker()
+        }
         print("[\(Self.TAG)] PoseLandmarker reinitialized with new config")
     }
 
     // MARK: - Dispose
 
     func dispose() {
-        // Stop landmarker first — prevents new callbacks
-        poseLandmarker = nil
-
-        // Drain inferenceQueue to ensure no in-flight callbacks
-        inferenceQueue.sync {}
-
-        // Now safe to stop camera
+        // 1. Stop camera — no new frames enter the pipeline
         sessionQueue.sync {
             captureSession?.stopRunning()
             captureSession = nil
         }
 
-        if let texId = cameraTexture != nil ? textureId : nil {
-            textureRegistry?.unregisterTexture(texId)
+        // 2. Drain inferenceQueue — waits for in-flight captureOutput + detectAsync
+        inferenceQueue.sync {
+            poseLandmarker = nil
+        }
+
+        // 3. Drain bufferQueue — waits for in-flight pose_buffer_write
+        bufferQueue.sync {
+            if let ptr = bufferPointer {
+                pose_buffer_free(ptr)
+                bufferPointer = nil
+            }
+        }
+
+        // 4. Release Flutter texture
+        if cameraTexture != nil {
+            textureRegistry?.unregisterTexture(textureId)
         }
         cameraTexture = nil
         textureId = -1
-
-        if let ptr = bufferPointer {
-            pose_buffer_free(ptr)
-            bufferPointer = nil
-        }
 
         print("[\(Self.TAG)] NativeMotionEngine disposed")
     }
@@ -278,9 +284,16 @@ extension NativeMotionEngine: PoseLandmarkerLiveStreamDelegate {
 
         // Write to C buffer via pose_buffer_write (frameId written LAST)
         frameId += 1
-        poseLandmarkData.withUnsafeBufferPointer { posePtr in
-            worldLandmarkData.withUnsafeBufferPointer { worldPtr in
-                pose_buffer_write(bufferPointer, frameId, posePtr.baseAddress, worldPtr.baseAddress)
+        let currentFrameId = frameId
+        // Capture array snapshots — Swift value types are CoW, safe to capture
+        let poseSnapshot = poseLandmarkData
+        let worldSnapshot = worldLandmarkData
+        bufferQueue.async { [weak self] in
+            guard let self = self, let ptr = self.bufferPointer else { return }
+            poseSnapshot.withUnsafeBufferPointer { posePtr in
+                worldSnapshot.withUnsafeBufferPointer { worldPtr in
+                    pose_buffer_write(ptr, currentFrameId, posePtr.baseAddress, worldPtr.baseAddress)
+                }
             }
         }
     }

@@ -13,6 +13,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.ByteBufferImageBuilder
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
@@ -33,7 +34,7 @@ import java.util.concurrent.TimeUnit
  * - Dart reads PoseBuffer via FFI (no MethodChannel for pose data)
  *
  * Performance constraints:
- * - No Bitmap conversions
+ * - Zero-copy ByteBuffer path (CameraX RGBA_8888 → MediaPipe GPU)
  * - No per-frame allocation (reusable FloatArrays)
  * - No frame queuing (KEEP_ONLY_LATEST)
  * - Timestamp synchronization prevents drift
@@ -68,7 +69,7 @@ class NativeMotionEngine(
     @Volatile private var poseLandmarker: PoseLandmarker? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
-    private val analysisExecutor = Executors.newSingleThreadExecutor()
+    private var analysisExecutor = Executors.newSingleThreadExecutor()
     private val bufferLock = Any()
     private val landmarkerLock = Any()
 
@@ -164,6 +165,7 @@ class NativeMotionEngine(
         }
 
         if (result.landmarks().isEmpty()) return
+        if (result.worldLandmarks().isEmpty()) return
 
         val imageLandmarks = result.landmarks()[0]
         val worldLandmarks = result.worldLandmarks()[0]
@@ -268,16 +270,23 @@ class NativeMotionEngine(
 
     private fun processImageProxy(imageProxy: ImageProxy) {
         try {
-            // CameraX RGBA_8888 → Bitmap → MPImage (no per-frame allocation beyond toBitmap)
-            val bitmap = imageProxy.toBitmap()
-            val mpImage = BitmapImageBuilder(bitmap).build()
+            // CameraX RGBA_8888 → MPImage. Prefer zero-copy ByteBuffer when stride is tight;
+            // fall back to Bitmap path if the row stride has padding.
+            val plane = imageProxy.planes[0]
+            val mpImage = if (plane.rowStride == imageProxy.width * 4) {
+                val buffer = plane.buffer
+                buffer.rewind()
+                ByteBufferImageBuilder(buffer, imageProxy.width, imageProxy.height, MPImage.IMAGE_FORMAT_RGBA).build()
+            } else {
+                BitmapImageBuilder(imageProxy.toBitmap()).build()
+            }
 
             val timestampMs = imageProxy.imageInfo.timestamp / 1000 // us → ms
 
             // Store rotation for landmark coordinate transform in handlePoseResult
             currentRotationDegrees = imageProxy.imageInfo.rotationDegrees
 
-            // Let MediaPipe handle rotation on GPU — zero allocation
+            // Tell MediaPipe how the sensor image is rotated relative to upright display.
             val rotation = imageProxy.imageInfo.rotationDegrees
             val processingOptions = ImageProcessingOptions.builder()
                 .setRotationDegrees(rotation)
@@ -330,6 +339,8 @@ class NativeMotionEngine(
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
+        // Recreate executor so engine can be re-initialized if needed
+        analysisExecutor = Executors.newSingleThreadExecutor()
 
         // 3. Close landmarker after executor is idle — no detectAsync in-flight
         synchronized(landmarkerLock) {

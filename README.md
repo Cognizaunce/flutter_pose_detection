@@ -12,6 +12,7 @@ Hardware-accelerated pose detection Flutter plugin using MediaPipe PoseLandmarke
 - **Cross-Platform**: iOS (CoreML/Metal) and Android (GPU/NPU Delegate)
 - **NPU Support**: Qualcomm QNN delegate for Snapdragon devices (battery-efficient)
 - **Hardware Acceleration**: Automatic GPU fallback to CPU
+- **Motion Engine (FFI)**: Zero-serialization real-time pose detection via shared memory — no MethodChannel overhead
 - **Real-time**: Camera frame processing with FPS tracking
 - **Video Analysis**: Process video files with progress tracking
 - **Angle Calculation**: Built-in utilities for body angle measurements
@@ -29,7 +30,7 @@ Hardware-accelerated pose detection Flutter plugin using MediaPipe PoseLandmarke
 | Platform | ML Framework | Model | Acceleration |
 |----------|-------------|-------|--------------|
 | iOS 14+ | TFLite 2.14 + CoreML/Metal | pose_detector + pose_landmarks_detector | Neural Engine → GPU → CPU |
-| Android API 31+ | MediaPipe Tasks 0.10.14 | pose_landmarker_lite.task | GPU → CPU |
+| Android API 31+ | MediaPipe Tasks 0.10.32 | pose_landmarker_lite.task | GPU → CPU |
 | Android API 31+ (Snapdragon) | TFLite + QNN Delegate | pose_landmarks_detector.tflite | NPU (HTP) → CPU |
 
 ## Installation
@@ -246,6 +247,133 @@ dependencies {
 
 Without these files, `preferredAcceleration: AccelerationMode.npu` will fall back to CPU
 
+## Motion Engine (FFI)
+
+The Motion Engine is a high-performance path for real-time pose detection. It bypasses MethodChannel entirely — camera frames are processed natively while pose data is written to a shared C buffer that Dart reads directly via FFI.
+
+### Architecture
+
+```
+CameraX / AVFoundation
+  ├─ Preview  → Flutter SurfaceTexture (display)
+  └─ Analysis → MediaPipe GPU (LIVE_STREAM)
+                  └─ C PoseBuffer (1060 bytes, shared memory)
+                       └─ Dart FFI read (lock-free, torn-read safe)
+```
+
+- **No serialization**: Landmarks are written as raw floats to a C struct, read directly by Dart
+- **Decoupled pipelines**: Video rendering is independent of inference — no frame drops on UI
+- **Zero-copy image path** (Android): CameraX RGBA_8888 ByteBuffer → MediaPipe GPU directly
+- **Lock-free reads**: Dart detects torn reads via frameId counter (read-before/after pattern)
+
+### Usage
+
+```dart
+import 'package:flutter_pose_detection/flutter_pose_detection.dart';
+
+// 1. Initialize detector
+final detector = NpuPoseDetector();
+await detector.initialize();
+
+// 2. Start the motion engine
+final engine = await detector.startMotionEngine(
+  config: MotionEngineConfig(
+    minPoseDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  ),
+);
+
+// 3. Display camera feed
+Texture(textureId: engine.textureId)
+
+// 4. Read pose data (call from animation callback or timer)
+final snapshot = engine.readLatestPose();
+if (snapshot != null) {
+  final nose = snapshot.poseLandmarks[0];
+  print('Nose at (${nose.x}, ${nose.y})');
+
+  // World-space landmarks (meters, hip-centered)
+  final worldNose = snapshot.worldLandmarks[0];
+  print('World nose: ${worldNose.x}m, ${worldNose.y}m, ${worldNose.z}m');
+}
+
+// 5. Update config at runtime (re-creates landmarker atomically)
+await detector.updateMotionEngineConfig(
+  MotionEngineConfig(minPoseDetectionConfidence: 0.7),
+);
+
+// 6. Clean up
+await detector.stopMotionEngine();
+detector.dispose();
+```
+
+### Configuration
+
+```dart
+MotionEngineConfig(
+  minPoseDetectionConfidence: 0.5,  // 0.0–1.0
+  minTrackingConfidence: 0.5,       // 0.0–1.0
+  minPosePresenceConfidence: 0.5,   // 0.0–1.0
+  numPoses: 1,
+)
+```
+
+### PoseSnapshot
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `frameId` | `int` | Monotonically increasing frame counter |
+| `poseLandmarks` | `List<LandmarkData>` | 33 landmarks in normalized image space (x, y in [0,1]) |
+| `worldLandmarks` | `List<LandmarkData>` | 33 landmarks in meters (hip-centered) |
+
+Each `LandmarkData` has `x`, `y`, `z`, and `visibility` fields.
+
+### Skeleton Overlay Example
+
+```dart
+class _MotionEnginePageState extends State<MotionEnginePage>
+    with SingleTickerProviderStateMixin {
+  NativeMotionEngine? _engine;
+  PoseSnapshot? _latestPose;
+  late final Ticker _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker((_) {
+      final snapshot = _engine?.readLatestPose();
+      if (snapshot != null) {
+        setState(() => _latestPose = snapshot);
+      }
+    });
+    _startEngine();
+  }
+
+  Future<void> _startEngine() async {
+    final detector = NpuPoseDetector();
+    await detector.initialize();
+    final engine = await detector.startMotionEngine();
+    setState(() => _engine = engine);
+    _ticker.start();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_engine == null) return const CircularProgressIndicator();
+    return Stack(
+      children: [
+        AspectRatio(
+          aspectRatio: 3.0 / 4.0,
+          child: Texture(textureId: _engine!.textureId),
+        ),
+        if (_latestPose != null)
+          CustomPaint(painter: SkeletonPainter(_latestPose!)),
+      ],
+    );
+  }
+}
+```
+
 ## Camera Stream Processing
 
 ```dart
@@ -384,6 +512,9 @@ if (result.hasPoses) {
 | `processFrame(...)` | Process single camera frame |
 | `startCameraDetection()` | Start camera stream detection |
 | `stopCameraDetection()` | Stop camera detection |
+| `startMotionEngine({MotionEngineConfig})` | Start FFI motion engine, returns `NativeMotionEngine` |
+| `stopMotionEngine()` | Stop motion engine and release native resources |
+| `updateMotionEngineConfig(MotionEngineConfig)` | Update motion engine config at runtime |
 | `analyzeVideo(String)` | Analyze video file |
 | `cancelVideoAnalysis()` | Cancel ongoing video analysis |
 | `updateConfig(PoseDetectorConfig)` | Update configuration |
@@ -397,6 +528,13 @@ if (result.hasPoses) {
 | `accelerationMode` | `AccelerationMode` | Current hardware acceleration |
 | `config` | `PoseDetectorConfig` | Current configuration |
 | `videoAnalysisProgress` | `Stream<VideoAnalysisProgress>` | Video analysis progress |
+
+### NativeMotionEngine
+
+| Property / Method | Type | Description |
+|-------------------|------|-------------|
+| `textureId` | `int` | Flutter texture ID for `Texture(textureId:)` |
+| `readLatestPose()` | `PoseSnapshot?` | Lock-free FFI read — returns `null` if no new frame or torn read |
 
 ## Documentation
 

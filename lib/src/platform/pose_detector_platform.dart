@@ -121,7 +121,8 @@ abstract class PoseDetectorPlatform extends PlatformInterface {
   ///
   /// Returns a map with 'textureId' (int) and 'pointerAddress' (int).
   Future<Map<String, dynamic>> initializeMotionEngine(
-      Map<String, dynamic> config);
+    Map<String, dynamic> config,
+  );
 
   /// Update the motion engine configuration (requires landmarker reinit).
   Future<void> updateMotionEngineConfig(Map<String, dynamic> config);
