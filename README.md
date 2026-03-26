@@ -278,6 +278,9 @@ await detector.initialize();
 // 2. Start the motion engine
 final engine = await detector.startMotionEngine(
   config: MotionEngineConfig(
+    modelComplexity: ModelComplexity.lite,
+    cameraFacing: CameraFacing.front,
+    targetFps: 30,
     minPoseDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5,
   ),
@@ -311,12 +314,35 @@ detector.dispose();
 
 ```dart
 MotionEngineConfig(
-  minPoseDetectionConfidence: 0.5,  // 0.0–1.0
-  minTrackingConfidence: 0.5,       // 0.0–1.0
-  minPosePresenceConfidence: 0.5,   // 0.0–1.0
+  modelComplexity: ModelComplexity.lite,   // lite, full, or heavy
+  cameraFacing: CameraFacing.front,        // front or back
+  targetFps: 0,                            // 0 = unlimited, 30 = cap at 30
+  minPoseDetectionConfidence: 0.5,         // 0.0–1.0
+  minTrackingConfidence: 0.5,              // 0.0–1.0
+  minPosePresenceConfidence: 0.5,          // 0.0–1.0
   numPoses: 1,
 )
 ```
+
+#### Model Complexity
+
+| Complexity | Model File | Accuracy | Speed |
+|------------|-----------|----------|-------|
+| `lite` (default) | pose_landmarker_lite.task | Good | ~3ms |
+| `full` | pose_landmarker_full.task | Better | ~8ms |
+| `heavy` | pose_landmarker_heavy.task | Best | ~15ms |
+
+All three `.task` files must be placed in `android/src/main/assets/` and `ios/Assets/`.
+Download from [MediaPipe Models](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker#models).
+
+#### Target FPS
+
+`targetFps` caps how many frames per second go to MediaPipe for inference. The camera preview always runs at full speed — only inference is throttled. Use this to save battery when you don't need maximum detection rate.
+
+- `0` (default): Every frame is processed (bounded by camera rate and inference speed)
+- `30`: Process at most 30 frames/sec, skip the rest
+
+> **Note:** Switching `cameraFacing` requires calling `stopMotionEngine()` then `startMotionEngine()` — it cannot be changed via `updateMotionEngineConfig()`.
 
 ### PoseSnapshot
 
@@ -499,6 +525,8 @@ if (result.hasPoses) {
 | Model | Input Size | Output |
 |-------|------------|--------|
 | pose_landmarker_lite.task | 256x256 | 33 landmarks (x, y, z, visibility, presence) |
+| pose_landmarker_full.task | 256x256 | 33 landmarks (x, y, z, visibility, presence) |
+| pose_landmarker_heavy.task | 256x256 | 33 landmarks (x, y, z, visibility, presence) |
 
 ## API Reference
 
