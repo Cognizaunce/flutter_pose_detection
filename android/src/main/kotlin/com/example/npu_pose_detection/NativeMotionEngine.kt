@@ -47,8 +47,13 @@ class NativeMotionEngine(
 
     companion object {
         private const val TAG = "NativeMotionEngine"
-        private const val MODEL_ASSET = "pose_landmarker_lite.task"
         private const val NUM_LANDMARKS = 33
+
+        private val MODEL_ASSETS = mapOf(
+            "lite" to "pose_landmarker_lite.task",
+            "full" to "pose_landmarker_full.task",
+            "heavy" to "pose_landmarker_heavy.task",
+        )
 
         init {
             System.loadLibrary("pose_buffer")
@@ -85,10 +90,17 @@ class NativeMotionEngine(
     private val worldLandmarkData = FloatArray(NUM_LANDMARKS * 4)
 
     // Runtime config
+    private var modelComplexity: String = "lite"
+    private var cameraFacing: String = "front"
+    private var targetFps: Int = 0
     private var minPoseDetectionConfidence: Float = 0.5f
     private var minTrackingConfidence: Float = 0.5f
     private var minPosePresenceConfidence: Float = 0.5f
     private var numPoses: Int = 1
+
+    // FPS throttle
+    private var minFrameIntervalMs: Long = 0
+    private var lastInferenceTimestampMs: Long = 0
 
     /**
      * Initialize the engine. Returns textureId + pointerAddress for Dart.
@@ -121,6 +133,10 @@ class NativeMotionEngine(
     }
 
     private fun applyConfig(config: Map<String, Any>) {
+        modelComplexity = (config["modelComplexity"] as? String) ?: "lite"
+        cameraFacing = (config["cameraFacing"] as? String) ?: "front"
+        targetFps = (config["targetFps"] as? Number)?.toInt() ?: 0
+        minFrameIntervalMs = if (targetFps > 0) 1000L / targetFps else 0
         minPoseDetectionConfidence =
             (config["minPoseDetectionConfidence"] as? Number)?.toFloat() ?: 0.5f
         minTrackingConfidence =
@@ -131,10 +147,12 @@ class NativeMotionEngine(
     }
 
     private fun initializePoseLandmarker() {
+        val modelAsset = MODEL_ASSETS[modelComplexity] ?: MODEL_ASSETS["lite"]!!
         val baseOptions = BaseOptions.builder()
-            .setModelAssetPath(MODEL_ASSET)
+            .setModelAssetPath(modelAsset)
             .setDelegate(Delegate.GPU)
             .build()
+        Log.i(TAG, "Loading model: $modelAsset")
 
         val options = PoseLandmarker.PoseLandmarkerOptions.builder()
             .setBaseOptions(baseOptions)
@@ -159,11 +177,6 @@ class NativeMotionEngine(
      * flattens into reusable arrays, writes to C buffer via JNI.
      */
     private fun handlePoseResult(result: PoseLandmarkerResult, input: MPImage) {
-        // Timestamp synchronization: discard stale results
-        if (result.timestampMs() < latestSubmittedTimestamp) {
-            return
-        }
-
         if (result.landmarks().isEmpty()) return
         if (result.worldLandmarks().isEmpty()) return
 
@@ -255,7 +268,11 @@ class NativeMotionEngine(
             processImageProxy(imageProxy)
         }
 
-        val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+        val cameraSelector = if (cameraFacing == "back") {
+            CameraSelector.DEFAULT_BACK_CAMERA
+        } else {
+            CameraSelector.DEFAULT_FRONT_CAMERA
+        }
 
         provider.unbindAll()
         provider.bindToLifecycle(
@@ -270,6 +287,13 @@ class NativeMotionEngine(
 
     private fun processImageProxy(imageProxy: ImageProxy) {
         try {
+            val timestampMs = imageProxy.imageInfo.timestamp / 1000 // us → ms
+
+            // FPS throttle: skip frame if too soon since last inference
+            if (minFrameIntervalMs > 0 && timestampMs - lastInferenceTimestampMs < minFrameIntervalMs) {
+                return
+            }
+
             // CameraX RGBA_8888 → MPImage. Prefer zero-copy ByteBuffer when stride is tight;
             // fall back to Bitmap path if the row stride has padding.
             val plane = imageProxy.planes[0]
@@ -280,8 +304,6 @@ class NativeMotionEngine(
             } else {
                 BitmapImageBuilder(imageProxy.toBitmap()).build()
             }
-
-            val timestampMs = imageProxy.imageInfo.timestamp / 1000 // us → ms
 
             // Store rotation for landmark coordinate transform in handlePoseResult
             currentRotationDegrees = imageProxy.imageInfo.rotationDegrees
@@ -297,6 +319,7 @@ class NativeMotionEngine(
                 // Guard monotonic timestamp inside lock to prevent races with updateConfig reset
                 if (timestampMs <= latestSubmittedTimestamp) return
                 latestSubmittedTimestamp = timestampMs
+                lastInferenceTimestampMs = timestampMs
                 landmarker.detectAsync(mpImage, processingOptions, timestampMs)
             }
         } catch (e: Exception) {
@@ -319,6 +342,7 @@ class NativeMotionEngine(
             poseLandmarker = null
             frameId = 0
             latestSubmittedTimestamp = 0
+            lastInferenceTimestampMs = 0
 
             // Recreate with new config (still under lock so no frames sneak in)
             initializePoseLandmarker()

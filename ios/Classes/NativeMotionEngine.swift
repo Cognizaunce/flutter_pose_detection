@@ -45,10 +45,17 @@ class NativeMotionEngine: NSObject {
     private var worldLandmarkData = [Float](repeating: 0, count: NativeMotionEngine.NUM_LANDMARKS * 4)
 
     // Runtime config
+    private var modelComplexity: String = "lite"
+    private var cameraFacing: String = "front"
+    private var targetFps: Int = 0
     private var minPoseDetectionConfidence: Float = 0.5
     private var minTrackingConfidence: Float = 0.5
     private var minPosePresenceConfidence: Float = 0.5
     private var numPoses: Int = 1
+
+    // FPS throttle
+    private var minFrameIntervalMs: Int = 0
+    private var lastInferenceTimestampMs: Int = 0
 
     init(textureRegistry: FlutterTextureRegistry) {
         self.textureRegistry = textureRegistry
@@ -85,6 +92,10 @@ class NativeMotionEngine: NSObject {
     }
 
     private func applyConfig(_ config: [String: Any]) {
+        modelComplexity = config["modelComplexity"] as? String ?? "lite"
+        cameraFacing = config["cameraFacing"] as? String ?? "front"
+        targetFps = config["targetFps"] as? Int ?? 0
+        minFrameIntervalMs = targetFps > 0 ? 1000 / targetFps : 0
         minPoseDetectionConfidence = (config["minPoseDetectionConfidence"] as? NSNumber)?.floatValue ?? 0.5
         minTrackingConfidence = (config["minTrackingConfidence"] as? NSNumber)?.floatValue ?? 0.5
         minPosePresenceConfidence = (config["minPosePresenceConfidence"] as? NSNumber)?.floatValue ?? 0.5
@@ -92,10 +103,12 @@ class NativeMotionEngine: NSObject {
     }
 
     private func initializePoseLandmarker() {
-        guard let modelPath = getModelPath() else {
-            print("[\(Self.TAG)] ERROR: pose_landmarker_lite.task not found")
+        let modelName = "pose_landmarker_\(modelComplexity)"
+        guard let modelPath = getModelPath(name: modelName) else {
+            print("[\(Self.TAG)] ERROR: \(modelName).task not found")
             return
         }
+        print("[\(Self.TAG)] Loading model: \(modelName).task")
 
         let options = PoseLandmarkerOptions()
         options.baseOptions.modelAssetPath = modelPath
@@ -115,23 +128,23 @@ class NativeMotionEngine: NSObject {
         }
     }
 
-    private func getModelPath() -> String? {
+    private func getModelPath(name: String) -> String? {
         let podBundle = Bundle(for: type(of: self))
 
         // Try resource bundle (CocoaPods resource_bundles)
         if let resourceBundlePath = podBundle.path(forResource: "flutter_pose_detection", ofType: "bundle"),
            let resourceBundle = Bundle(path: resourceBundlePath),
-           let path = resourceBundle.path(forResource: "pose_landmarker_lite", ofType: "task") {
+           let path = resourceBundle.path(forResource: name, ofType: "task") {
             return path
         }
 
         // Try plugin bundle directly
-        if let path = podBundle.path(forResource: "pose_landmarker_lite", ofType: "task") {
+        if let path = podBundle.path(forResource: name, ofType: "task") {
             return path
         }
 
         // Try main bundle
-        if let path = Bundle.main.path(forResource: "pose_landmarker_lite", ofType: "task") {
+        if let path = Bundle.main.path(forResource: name, ofType: "task") {
             return path
         }
 
@@ -150,7 +163,8 @@ class NativeMotionEngine: NSObject {
         let session = AVCaptureSession()
         session.sessionPreset = .medium
 
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+        let position: AVCaptureDevice.Position = cameraFacing == "back" ? .back : .front
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
               let input = try? AVCaptureDeviceInput(device: device) else {
             print("[\(Self.TAG)] Failed to configure camera input")
             return
@@ -185,6 +199,7 @@ class NativeMotionEngine: NSObject {
             poseLandmarker = nil
             frameId = 0
             latestSubmittedTimestamp = 0
+            lastInferenceTimestampMs = 0
             initializePoseLandmarker()
         }
         print("[\(Self.TAG)] PoseLandmarker reinitialized with new config")
@@ -237,8 +252,14 @@ extension NativeMotionEngine: AVCaptureVideoDataOutputSampleBufferDelegate {
         let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let timestampMs = Int(CMTimeGetSeconds(timestamp) * 1000)
 
+        // FPS throttle: skip frame if too soon since last inference
+        if minFrameIntervalMs > 0 && timestampMs - lastInferenceTimestampMs < minFrameIntervalMs {
+            return
+        }
+
         guard timestampMs > latestSubmittedTimestamp else { return }
         latestSubmittedTimestamp = timestampMs
+        lastInferenceTimestampMs = timestampMs
 
         // Send to MediaPipe (NO UIImage conversion)
         do {

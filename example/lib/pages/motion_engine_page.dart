@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_pose_detection/flutter_pose_detection.dart';
@@ -26,8 +25,10 @@ class _MotionEnginePageState extends State<MotionEnginePage>
   Ticker? _ticker;
 
   // FPS tracking
-  int _frameCount = 0;
-  double _fps = 0;
+  int _inferenceFrameCount = 0;
+  int _displayFrameCount = 0;
+  double _inferenceFps = 0;
+  double _displayFps = 0;
   DateTime _lastFpsUpdate = DateTime.now();
 
   // Config
@@ -42,14 +43,6 @@ class _MotionEnginePageState extends State<MotionEnginePage>
 
   Future<void> _initialize() async {
     try {
-      // Ensure camera permission is granted before starting native camera.
-      // availableCameras() triggers the system permission dialog if needed.
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        if (mounted) setState(() => _status = 'No cameras available');
-        return;
-      }
-
       _detector = NpuPoseDetector(
         config: PoseDetectorConfig.realtime(),
       );
@@ -57,6 +50,9 @@ class _MotionEnginePageState extends State<MotionEnginePage>
 
       final engine = await _detector!.startMotionEngine(
         config: MotionEngineConfig(
+          cameraFacing: CameraFacing.back,
+          modelComplexity: ModelComplexity.full,
+          targetFps: 30,
           minPoseDetectionConfidence: _detectionConfidence,
           minTrackingConfidence: _trackingConfidence,
         ),
@@ -83,16 +79,19 @@ class _MotionEnginePageState extends State<MotionEnginePage>
     final snapshot = _engine?.readLatestPose();
     if (snapshot != null) {
       setState(() => _latestSnapshot = snapshot);
+      _inferenceFrameCount++;
     }
+    _displayFrameCount++;
 
     // Update FPS counter
-    _frameCount++;
     final now = DateTime.now();
     final diff = now.difference(_lastFpsUpdate).inMilliseconds;
     if (diff >= 1000) {
       setState(() {
-        _fps = _frameCount * 1000 / diff;
-        _frameCount = 0;
+        _inferenceFps = _inferenceFrameCount * 1000 / diff;
+        _displayFps = _displayFrameCount * 1000 / diff;
+        _inferenceFrameCount = 0;
+        _displayFrameCount = 0;
         _lastFpsUpdate = now;
       });
     }
@@ -133,7 +132,7 @@ class _MotionEnginePageState extends State<MotionEnginePage>
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                '${_fps.toStringAsFixed(1)} FPS',
+                '${_inferenceFps.toStringAsFixed(0)} / ${_displayFps.toStringAsFixed(0)} FPS',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -182,7 +181,7 @@ class _MotionEnginePageState extends State<MotionEnginePage>
                             CustomPaint(
                               painter: _SnapshotOverlayPainter(
                                 snapshot: _latestSnapshot!,
-                                mirror: true, // front camera
+                                mirror: true, // flip for front camera
                               ),
                             ),
 
