@@ -82,7 +82,7 @@ android {
     dependencies {
         // MediaPipe Tasks - Pose Landmarker with GPU/CPU support
         // Note: tasks-vision includes GPU acceleration via delegates
-        implementation("com.google.mediapipe:tasks-vision:0.10.32")
+        implementation("com.google.mediapipe:tasks-vision:0.10.33")
 
         // TensorFlow Lite for Interpreter API (fallback)
         implementation("org.tensorflow:tensorflow-lite:2.17.0")

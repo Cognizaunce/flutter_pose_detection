@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:flutter_pose_detection/flutter_pose_detection.dart';
@@ -14,13 +13,13 @@ void main() {
       // Initialize detector
       detector = NpuPoseDetector();
       final mode = await detector.initialize();
-      print('✅ Detector initialized');
-      print('   Acceleration mode: $mode');
+      debugPrint('✅ Detector initialized');
+      debugPrint('   Acceleration mode: $mode');
     });
 
     tearDownAll(() {
       detector.dispose();
-      print('✅ Detector disposed');
+      debugPrint('✅ Detector disposed');
     });
 
     testWidgets('Detector initializes with hardware acceleration',
@@ -30,7 +29,7 @@ void main() {
 
       // Check acceleration mode
       final mode = detector.accelerationMode;
-      print('Current acceleration mode: $mode');
+      debugPrint('Current acceleration mode: $mode');
 
       expect(mode, isNotNull);
       expect(
@@ -39,7 +38,7 @@ void main() {
             mode == AccelerationMode.cpu,
         isTrue,
       );
-      print('✅ Detector acceleration mode verified: $mode');
+      debugPrint('✅ Detector acceleration mode verified: $mode');
     });
 
     testWidgets('Image pose detection returns valid results', (tester) async {
@@ -51,17 +50,17 @@ void main() {
 
         // Result should not be null (even if no pose detected)
         expect(result, isNotNull);
-        print('✅ Image detection completed');
-        print('   Poses found: ${result.poses.length}');
-        print('   Processing time: ${result.processingTimeMs}ms');
-        print('   Acceleration mode: ${result.accelerationMode}');
+        debugPrint('✅ Image detection completed');
+        debugPrint('   Poses found: ${result.poses.length}');
+        debugPrint('   Processing time: ${result.processingTimeMs}ms');
+        debugPrint('   Acceleration mode: ${result.accelerationMode}');
 
         // Validate result structure
         expect(result.processingTimeMs, greaterThanOrEqualTo(0));
         expect(result.imageWidth, greaterThan(0));
         expect(result.imageHeight, greaterThan(0));
       } catch (e) {
-        print('⚠️ Image detection error (may be expected with minimal test image): $e');
+        debugPrint('⚠️ Image detection error (may be expected with minimal test image): $e');
         // This might be acceptable depending on the image
       }
     });
@@ -72,7 +71,7 @@ void main() {
         await detector.detectPose(Uint8List(0));
         fail('Should throw on empty input');
       } catch (e) {
-        print('✅ Empty input handled correctly: ${e.runtimeType}');
+        debugPrint('✅ Empty input handled correctly: ${e.runtimeType}');
         // Any exception is acceptable for invalid input
       }
     });
@@ -90,15 +89,15 @@ void main() {
       expect(customDetector.config.mode, equals(DetectionMode.fast));
       expect(customDetector.config.maxPoses, equals(1));
       expect(customDetector.config.minConfidence, equals(0.5));
-      print('✅ Custom config detector created');
+      debugPrint('✅ Custom config detector created');
 
       // Initialize and dispose
       await customDetector.initialize();
       expect(customDetector.isInitialized, isTrue);
-      print('✅ Custom config detector initialized');
+      debugPrint('✅ Custom config detector initialized');
 
       customDetector.dispose();
-      print('✅ Custom config detector disposed');
+      debugPrint('✅ Custom config detector disposed');
     });
 
     testWidgets('Multiple detectors share platform state', (tester) async {
@@ -108,25 +107,25 @@ void main() {
       // Initialize
       await testDetector.initialize();
       expect(testDetector.isInitialized, isTrue);
-      print('✅ Test detector initialized');
+      debugPrint('✅ Test detector initialized');
 
       // Create another detector - should share platform state
       final anotherDetector = NpuPoseDetector();
       // Platform is shared (singleton), so should also be initialized
       expect(anotherDetector.isInitialized, isTrue);
-      print('✅ Another detector shares platform state');
+      debugPrint('✅ Another detector shares platform state');
 
       // Both should have same acceleration mode
       expect(
         testDetector.accelerationMode,
         equals(anotherDetector.accelerationMode),
       );
-      print('✅ Both detectors have same acceleration mode');
+      debugPrint('✅ Both detectors have same acceleration mode');
 
       // Dispose test detector
       testDetector.dispose();
       // Note: Platform singleton remains initialized for other users
-      print('✅ Test detector disposed');
+      debugPrint('✅ Test detector disposed');
     });
 
     testWidgets('PoseResult handles empty poses correctly', (tester) async {
@@ -140,7 +139,7 @@ void main() {
       expect(emptyResult.hasPoses, isFalse);
       expect(emptyResult.poseCount, equals(0));
       expect(emptyResult.firstPose, isNull);
-      print('✅ Empty PoseResult handled correctly');
+      debugPrint('✅ Empty PoseResult handled correctly');
     });
 
     testWidgets('Video analysis handles invalid path gracefully',
@@ -149,7 +148,7 @@ void main() {
         await detector.analyzeVideo('/nonexistent/video.mp4');
         fail('Should throw on invalid path');
       } catch (e) {
-        print('✅ Invalid video path handled correctly: ${e.runtimeType}');
+        debugPrint('✅ Invalid video path handled correctly: ${e.runtimeType}');
         // Any error is acceptable for invalid path
       }
     });
@@ -158,9 +157,9 @@ void main() {
       // Should not throw when stopping without starting
       try {
         await detector.stopCameraDetection();
-        print('✅ Stop camera detection without start handled correctly');
+        debugPrint('✅ Stop camera detection without start handled correctly');
       } catch (e) {
-        print('⚠️ Stop camera detection error (acceptable): ${e.runtimeType}');
+        debugPrint('⚠️ Stop camera detection error (acceptable): ${e.runtimeType}');
       }
     });
 
@@ -169,9 +168,9 @@ void main() {
       // Should not throw when cancelling without active analysis
       try {
         await detector.cancelVideoAnalysis();
-        print('✅ Cancel video analysis without active analysis handled correctly');
+        debugPrint('✅ Cancel video analysis without active analysis handled correctly');
       } catch (e) {
-        print('⚠️ Cancel video analysis error (acceptable): ${e.runtimeType}');
+        debugPrint('⚠️ Cancel video analysis error (acceptable): ${e.runtimeType}');
       }
     });
   });

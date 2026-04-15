@@ -252,7 +252,7 @@ class _CameraDetectionPageState extends State<CameraDetectionPage> {
           padding: const EdgeInsets.all(12),
           child: Text(
             'No pose detected',
-            style: TextStyle(color: Colors.white.withOpacity(0.8)),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
           ),
         ),
       );
@@ -275,13 +275,13 @@ class _CameraDetectionPageState extends State<CameraDetectionPage> {
                 Text(
                   'Pose detected',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 Text(
                   'Score: ${(pose.score * 100).toStringAsFixed(0)}%',
-                  style: TextStyle(color: Colors.white.withOpacity(0.7)),
+                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7)),
                 ),
               ],
             ),
@@ -289,7 +289,7 @@ class _CameraDetectionPageState extends State<CameraDetectionPage> {
             Text(
               '$visibleCount / 33 landmarks visible',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
+                color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 12,
               ),
             ),
