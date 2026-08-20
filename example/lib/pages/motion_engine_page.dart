@@ -224,7 +224,7 @@ class _MotionEnginePageState extends State<MotionEnginePage>
           padding: const EdgeInsets.all(12),
           child: Text(
             'No pose detected',
-            style: TextStyle(color: Colors.white.withOpacity(0.8)),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
           ),
         ),
       );
@@ -244,7 +244,7 @@ class _MotionEnginePageState extends State<MotionEnginePage>
             Text(
               'Pose detected (FFI)',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.9),
+                color: Colors.white.withValues(alpha: 0.9),
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -252,7 +252,7 @@ class _MotionEnginePageState extends State<MotionEnginePage>
             Text(
               '$visibleCount / 33 landmarks visible',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
+                color: Colors.white.withValues(alpha: 0.7),
                 fontSize: 12,
               ),
             ),
@@ -344,8 +344,7 @@ class _SnapshotOverlayPainter extends CustomPainter {
   _SnapshotOverlayPainter({
     required this.snapshot,
     this.mirror = false,
-    this.minVisibility = 0.3,
-  });
+  }) : minVisibility = 0.3;
 
   @override
   void paint(Canvas canvas, Size size) {
